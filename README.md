@@ -27,7 +27,7 @@ This is the code for reproducing the paper "Prior Convictions: Black-box Adversa
 
 The results can be reproduced (with the default hyperparameters) with the following command:
 ```
-python main.py [--nes] [--tiling] --json-config [configs/l2.json | configs/linf.json | configs/linf-nes.json | configs/l2-nes.json]
+python main.py [--nes] [--tiling] --json-config [configs/l2.json | configs/linf.json | configs/nes-linf.json | configs/nes-l2.json]
 ```
 
 You can run ```python main.py --help``` to see all of the available options/hyperparameters. Although the hyperparameters were tuned for Inception-v3, the attack can by run with the flag `--classifier {inception_v3,resnet50,vgg16_bn}` to attack other classifiers.
