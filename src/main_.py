@@ -3,7 +3,6 @@ from torchvision import models, transforms
 from torchvision.datasets import ImageFolder
 import torchvision.transforms.functional as F
 from torch.utils.data import DataLoader
-from torch.nn import DataParallel
 from torch.nn.modules import Upsample
 import argparse
 import json
@@ -132,7 +131,7 @@ def make_adversarial_examples(image, true_label, args, model_to_fool, IMAGENET_S
 
     # Original classifications
     orig_images = image.clone()
-    orig_classes = model_to_fool(image).argmax(1).cuda()
+    orig_classes = model_to_fool(image).argmax(1)
     correct_classified_mask = (orig_classes == true_label).float()
     total_ims = correct_classified_mask.sum()
     not_dones_mask = correct_classified_mask.clone()
@@ -143,7 +142,7 @@ def make_adversarial_examples(image, true_label, args, model_to_fool, IMAGENET_S
         if t >= args.max_queries:
             break
         if not args.nes:
-            ## Updating the prior: 
+            ## Updating the prior:
             # Create noise for exporation, estimate the gradient, and take a PGD step
             exp_noise = args.exploration * ch.randn_like(prior) / (dim ** 0.5)
             # Query deltas for finite difference estimator
@@ -165,7 +164,7 @@ def make_adversarial_examples(image, true_label, args, model_to_fool, IMAGENET_S
                 est_deriv = (L(image + args.fd_eta * exp_noise) - L(image - args.fd_eta * exp_noise)) / args.fd_eta
                 prior += est_deriv.view(-1, 1, 1, 1) * exp_noise
 
-            # Preserve images that are already done, 
+            # Preserve images that are already done,
             # Unless we are specifically measuring gradient estimation
             prior = prior * not_dones_mask.view(-1, 1, 1, 1)
 
@@ -219,12 +218,15 @@ def main(args, model_to_fool, dataset_size):
                               transforms.CenterCrop(dataset_size),
                               transforms.ToTensor(),
                           ]))
+    print("Start loading Dataset")
     dataset_loader = DataLoader(dataset, batch_size=args.batch_size)
+    print("Dataset loaded")
     total_correct, total_adv, total_queries = 0, 0, 0
+
     for i, (images, targets) in enumerate(dataset_loader):
         if i * args.batch_size >= args.total_images:
             break
-        res = make_adversarial_examples(images.cuda(), targets.cuda(), args, model_to_fool, dataset_size)
+        res = make_adversarial_examples(images, targets, args, model_to_fool, dataset_size)
         ncc = res['num_correctly_classified']  # Number of correctly classified images (originally)
         num_adv = ncc * res['success_rate']  # Success rate was calculated as (# adv)/(# correct classified)
         queries = num_adv * res[
@@ -275,7 +277,7 @@ if __name__ == "__main__":
     parser.add_argument('--total-images', type=int)
     parser.add_argument('--classifier', type=str, default='inception_v3', choices=CLASSIFIERS.keys())
     args = parser.parse_args()
-
+    print("Argument Parsed")
     args_dict = None
     if not args.json_config:
         # If there is no json file, all of the args must be given
@@ -290,8 +292,9 @@ if __name__ == "__main__":
         args_dict = defaults
 
     model_type = CLASSIFIERS[args.classifier][0]
-    model_to_fool = model_type(pretrained=True).cuda()
-    model_to_fool = DataParallel(model_to_fool)
+    model_to_fool = model_type(pretrained=True)
+    # model_to_fool = model_type(pretrained=True).cuda()
+    # model_to_fool = DataParallel(model_to_fool)
     model_to_fool.eval()
 
     with ch.no_grad():
