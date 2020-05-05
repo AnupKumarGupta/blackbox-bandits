@@ -3,8 +3,8 @@ from torchvision import models, transforms
 from torchvision.datasets import ImageFolder
 import torchvision.transforms.functional as F
 from torch.utils.data import DataLoader
-from torch.nn import DataParallel
 from torch.nn.modules import Upsample
+import datetime
 import argparse
 import json
 import pdb
@@ -120,6 +120,7 @@ def make_adversarial_examples(image, true_label, args, model_to_fool, IMAGENET_S
 
     # Loss function
     criterion = ch.nn.CrossEntropyLoss(reduction='none')
+    print("Criterion Decided")
 
     def normalized_eval(x):
         x_copy = x.clone()
@@ -127,23 +128,29 @@ def make_adversarial_examples(image, true_label, args, model_to_fool, IMAGENET_S
                            for i in range(args.batch_size)])
         return model_to_fool(x_copy)
 
+    print("Creating Lambda")
     L = lambda x: criterion(normalized_eval(x), true_label)
-    losses = L(image)
+    # losses = L(image)
+    print("Lambda created")
 
     # Original classifications
     orig_images = image.clone()
-    orig_classes = model_to_fool(image).argmax(1).cuda()
+    orig_classes = model_to_fool(image).argmax(1)
+    print("Original Classes ", orig_classes)
     correct_classified_mask = (orig_classes == true_label).float()
     total_ims = correct_classified_mask.sum()
     not_dones_mask = correct_classified_mask.clone()
 
+    print("Starting Query Loop")
     t = 0
     while not ch.any(total_queries > args.max_queries):
+        if t % 1000 == 0:
+            print(t, "th iteration")
         t += args.gradient_iters * 2
         if t >= args.max_queries:
             break
         if not args.nes:
-            ## Updating the prior: 
+            ## Updating the prior:
             # Create noise for exporation, estimate the gradient, and take a PGD step
             exp_noise = args.exploration * ch.randn_like(prior) / (dim ** 0.5)
             # Query deltas for finite difference estimator
@@ -195,11 +202,12 @@ def make_adversarial_examples(image, true_label, args, model_to_fool, IMAGENET_S
         max_curr_queries = total_queries.max().cpu().item()
         if args.log_progress:
             print("Queries: %d | Success rate: %f | Average queries: %f" % (
-            max_curr_queries, current_success_rate, success_queries))
+                max_curr_queries, current_success_rate, success_queries))
 
         if current_success_rate == 1.0:
             break
 
+    print("Ending Query Loop")
     return {
         'average_queries': success_queries,
         'num_correctly_classified': correct_classified_mask.sum().cpu().item(),
@@ -219,12 +227,16 @@ def main(args, model_to_fool, dataset_size):
                               transforms.CenterCrop(dataset_size),
                               transforms.ToTensor(),
                           ]))
+    print("Start loading Dataset")
     dataset_loader = DataLoader(dataset, batch_size=args.batch_size)
+    print("Dataset loaded")
     total_correct, total_adv, total_queries = 0, 0, 0
+
     for i, (images, targets) in enumerate(dataset_loader):
+        print(i, "th Image loaded")
         if i * args.batch_size >= args.total_images:
             break
-        res = make_adversarial_examples(images.cuda(), targets.cuda(), args, model_to_fool, dataset_size)
+        res = make_adversarial_examples(images, targets, args, model_to_fool, dataset_size)
         ncc = res['num_correctly_classified']  # Number of correctly classified images (originally)
         num_adv = ncc * res['success_rate']  # Success rate was calculated as (# adv)/(# correct classified)
         queries = num_adv * res[
@@ -232,6 +244,7 @@ def main(args, model_to_fool, dataset_size):
         total_correct += ncc
         total_adv += num_adv
         total_queries += queries
+        print("Total adversarial :{adv}  Total correct : {total}".format(adv=total_adv, total=total_correct))
 
     print("-" * 80)
     print("Final Success Rate: {succ} | Final Average Queries: {aq}".format(
@@ -275,7 +288,7 @@ if __name__ == "__main__":
     parser.add_argument('--total-images', type=int)
     parser.add_argument('--classifier', type=str, default='inception_v3', choices=CLASSIFIERS.keys())
     args = parser.parse_args()
-
+    print("Argument Parsed")
     args_dict = None
     if not args.json_config:
         # If there is no json file, all of the args must be given
@@ -290,8 +303,11 @@ if __name__ == "__main__":
         args_dict = defaults
 
     model_type = CLASSIFIERS[args.classifier][0]
-    model_to_fool = model_type(pretrained=True).cuda()
-    model_to_fool = DataParallel(model_to_fool)
+    print("Start loading model {}".format(datetime.datetime.now().time()))
+    model_to_fool = model_type(pretrained=True)
+    print("Model Loaded {}".format(datetime.datetime.now().time()))
+    # model_to_fool = model_type(pretrained=True).cuda()
+    # model_to_fool = DataParallel(model_to_fool)
     model_to_fool.eval()
 
     with ch.no_grad():
